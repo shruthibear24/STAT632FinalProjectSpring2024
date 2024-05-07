@@ -1,0 +1,172 @@
+---
+title: "STAT 632 Final Project-MLR with an Increased Sample Size"
+author: "Shruthi & Prabhjyot"
+format: 
+  html:
+    self-contained: true
+---
+
+```{r warning=FALSE,message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(MASS)
+library(car)
+```
+
+
+```{r warning=FALSE,message=FALSE}
+dat<-read_csv("historical_data.csv")
+```
+
+
+
+
+
+```{r}
+df <- dat %>%
+  mutate(
+    store_primary_category= if_else(is.na(store_primary_category),"Miscellanous",store_primary_category),
+    total_time = as.integer(difftime(actual_delivery_time, created_at)),
+    estimated_store_to_consumer_driving_duration=estimated_store_to_consumer_driving_duration/60,
+    estimated_order_place_durations = round(estimated_order_place_duration / 60,1),
+    subtotal=round(subtotal/100),
+    min_item_price=round(min_item_price/100,1),
+    max_item_price=round(max_item_price/100,1)
+
+  )
+```
+
+
+```{r}
+
+df2 <- df[, c("created_at", "actual_delivery_time", "store_primary_category", "store_id", "subtotal", "num_distinct_items", "min_item_price", "max_item_price", "total_onshift_dashers", "total_busy_dashers", "total_outstanding_orders", "estimated_store_to_consumer_driving_duration", "total_time", "estimated_order_place_durations")]
+
+
+```
+
+
+
+```{r}
+df <- dat %>%
+  mutate(
+    store_primary_category= if_else(is.na(store_primary_category),"Miscellanous",store_primary_category),
+    total_time = as.integer(difftime(actual_delivery_time, created_at)),
+    estimated_store_to_consumer_driving_duration=estimated_store_to_consumer_driving_duration/60,
+    estimated_order_place_durations = round(estimated_order_place_duration / 60,1),
+    subtotal=round(subtotal/100),
+    min_item_price=round(min_item_price/100,1),
+    max_item_price=round(max_item_price/100,1)
+
+  )
+```
+
+
+### Splitting of Data and randomly selecting 60000 rows
+
+```{r}
+ set.seed(123)
+ n <- nrow(df2)
+ train_index <- sample(1:n, round(0.70*n))
+ dash_train <- df2[train_index, ]
+ dash_test <- df2[-train_index, ] 
+#nrow(dash_test)
+dash_data <- dash_test[sample(nrow(dash_test), 5000), ]
+dash_data_inc<- dash_train[sample(nrow(dash_train),60000), ]
+nrow(dash_data_inc)
+```
+
+
+### Remove NA
+
+
+```{r}
+
+dash_data_inc_new<-na.omit(dash_data_inc)
+
+```
+
+```{r}
+dash_data_new_incr_lm<-dash_data_inc_new |> 
+ select(-created_at,-actual_delivery_time,-store_primary_category,-store_id)
+
+```
+
+
+### MLR Model Post AIC
+
+```{r}
+ml_full_1<-lm(total_time~.,data=dash_data_new_incr_lm)
+lm5 <- step(ml_full_1)
+summary(lm5)
+```
+
+
+
+
+
+```{r}
+lm6<-lm(total_time~subtotal+num_distinct_items+max_item_price+total_onshift_dashers+total_busy_dashers+total_outstanding_orders+estimated_store_to_consumer_driving_duration+estimated_order_place_durations,data=dash_data_new_incr_lm)
+summary(lm6)
+```
+
+### Assumption Checks
+
+```{r}
+
+plot(lm6)
+```
+
+
+### Box Cox Transformation
+
+```{r}
+
+boxcox(lm6)
+summary(powerTransform(lm6))
+```
+
+
+### MLR model after box cox 
+
+```{r}
+lm7 <- lm(total_time^((-0.11) - 1) /(-0.11)~ subtotal+num_distinct_items+max_item_price+total_onshift_dashers+total_busy_dashers+total_outstanding_orders+estimated_store_to_consumer_driving_duration+estimated_order_place_durations,data=dash_data_inc_new)
+# Display the summary of the linear regression model
+summary(lm7)
+```
+
+### Assumption Checks
+
+```{r}
+plot(lm7)
+```
+
+
+### Utilised Bootstrapping to extract p-value and w statistic for Shapiro-Wilk test
+
+
+```{r}
+
+library(boot)
+residuals <- residuals(lm7)
+
+shapiro_bootstrap_w <- function(data, indices) {
+  sample_data <- data[indices]
+  shapiro_test_result <- shapiro.test(sample_data)
+  return(shapiro_test_result$statistic)
+}
+
+num_bootstrap <- 1000  
+bootstrap_w_statistics <- numeric(num_bootstrap)
+
+for (i in 1:num_bootstrap) {
+  sample_indices <- sample(length(residuals), 5000, replace = TRUE)
+  bootstrap_w_statistics[i] <- shapiro_bootstrap_w(residuals, sample_indices)
+  bootstrap_p_values[i] <- shapiro_bootstrap(residuals, sample_indices)
+}
+
+w_statistic<-(mean(bootstrap_w_statistics))
+p_value<-mean(bootstrap_p_values)
+p_value
+w_statistic
+```
+
