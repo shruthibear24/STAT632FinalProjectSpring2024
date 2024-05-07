@@ -1,0 +1,297 @@
+---
+title: "STAT 632 Final Project"
+author: "Shruthi & Prabhjyot"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(MASS)
+library(car)
+```
+
+```{r}
+dat<-read_csv("datasets/historical_data.csv")
+```
+
+```{r}
+head(dat)
+```
+
+## Convert actual and created at to ymd format
+
+```{r}
+df <- dat %>%
+  mutate(
+    store_primary_category= if_else(is.na(store_primary_category),"Miscellanous",store_primary_category),
+    total_time = as.integer(difftime(actual_delivery_time, created_at)),
+    estimated_store_to_consumer_driving_duration=estimated_store_to_consumer_driving_duration/60,
+    estimated_order_place_durations = round(estimated_order_place_duration / 60,1),
+    subtotal=round(subtotal/100),
+    min_item_price=round(min_item_price/100,1),
+    max_item_price=round(max_item_price/100,1)
+
+  )
+
+#df$estimated_order_place_duration<-df$estimated_order_place_duration/60
+df2<-df |>  select(created_at,actual_delivery_time,store_primary_category,store_id,subtotal,num_distinct_items,min_item_price,max_item_price,total_onshift_dashers,total_busy_dashers,total_outstanding_orders,
+  estimated_store_to_consumer_driving_duration,total_time,estimated_order_place_durations)
+#df3<-na.omit(df2)
+head(df2)
+```
+
+```{r}
+ set.seed(123)
+ n <- nrow(df2)
+ train_index <- sample(1:n, round(0.70*n))
+ dash_train <- df2[train_index, ]
+ dash_test <- df2[-train_index, ] 
+ #nrow(dash_test)
+dash_data <- dash_test[sample(nrow(dash_test), 5000), ]
+nrow(dash_data)
+```
+
+```{r}
+na_counts <- colSums(is.na(dash_data))
+na_counts
+```
+
+## Descriptive Statistics
+
+```{r}
+summary_num_dat<-dash_data |> 
+   select(subtotal,num_distinct_items,min_item_price,max_item_price,total_onshift_dashers,
+          total_busy_dashers,total_outstanding_orders,estimated_store_to_consumer_driving_duration,total_time,estimated_order_place_durations)
+summary(summary_num_dat)
+```
+
+## Kable and Gt Summary -Prabh
+
+```{r}
+clean_data <- na.omit(summary_num_dat)
+mean_value <- colMeans(clean_data)
+
+sd_value <- apply(clean_data, 2, sd, digits = 2)
+
+mean_value <- round(mean_value, digits = 2)
+sd_value<- round(sd_value, digits = 2)
+library(knitr)
+means_df <- data.frame(Means = mean_value, SD = sd_value)
+
+
+
+
+
+
+knitr::kable(means_df, caption = "Summary Statistics")
+
+
+
+
+```
+
+## Boxplot for the Subtotal vs Store Primary Category
+
+### Remove NA from Dash_Data
+
+```{r}
+dash_data_new<-na.omit(dash_data)
+```
+
+```{r}
+# Number of Counts for Each Store Category Type and Total
+cat_count <-dash_data_new|> 
+  select(store_primary_category,subtotal) |> 
+  group_by(store_primary_category) |> 
+  summarize(count_category=n(),avg_subtotal=mean(subtotal)) |> 
+  arrange(desc(count_category))
+
+cat_count
+
+```
+
+```{r}
+# Subset the first 10 rows of cat_count_subset
+cat_count_subset <- head(cat_count, 10)
+
+# Create the bar plot
+barplot <- ggplot(cat_count_subset, aes(x = store_primary_category, y = count_category, fill = store_primary_category)) +
+  geom_col() +
+  labs(title = "Top 10 Most Ordered Store Categories" ,
+       x = "Store Category",
+       y = "Number of Counts") +
+  scale_fill_brewer(palette="RdYlGn")+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the bar plot
+print(barplot)
+```
+
+```{r}
+# Subset the last 10 rows of cat_count_subset
+cat_count_last_10 <- tail(cat_count, 10)
+
+# Create the bar plot
+barplot_last_10 <- ggplot(cat_count_last_10, aes(x = store_primary_category, y = count_category, fill = store_primary_category)) +
+  geom_col() +
+  labs(title = " 10 Least Ordered Store Categories",
+       x = "Store Category",
+       y = "Number of Counts") +
+  theme_minimal() +
+   scale_fill_brewer(palette="RdYlBu")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the bar plot
+print(barplot_last_10)
+```
+
+## Time-Line Plot for how many orders were created during the week
+
+```{r}
+t=ymd_hms(dash_data_new$actual_delivery_time)
+t1=ymd_hms(dash_data_new$created_at)
+r1<-dash_data_new |> 
+  mutate(
+date=date(t),
+year=year(t),
+month = month(t, label = T),
+wday = wday(t, label = T),
+hour_c = hour(t1),
+date_c=date(t1),
+year_c=year(t1),
+month_c = month(t1, label = T),
+wday_c = wday(t1, label = T),
+hour_c = hour(t1)
+  )
+
+orders_delivery_week <- r1 %>%
+  filter(store_primary_category %in% c("american", "burger", "chinese", "desert", "italian", "japanese", "mexican", "pizza", "sandwich", "thai")) %>%
+  group_by(wday) %>%
+  summarize(count = n())
+orders_delivery_week
+```
+
+```{r}
+
+ ggplot(orders_delivery_week, aes(x=wday,y=count,fill=wday)) + geom_bar(stat="identity", position = "dodge")+
+ scale_fill_brewer(palette="YlGnBu")+
+  xlab("Orders delivered during the week")
+```
+
+## Scatterplot Matrix for association
+
+```{r}
+head(dash_data_new)
+```
+
+```{r}
+# create df with numeric and required predictors
+dash_data_new_lm<-dash_data |> 
+  select(-created_at,-actual_delivery_time,-store_primary_category,-store_id)
+head(dash_data_new_lm)
+```
+
+### Scatterplot Matrix
+
+```{r , warning=FALSE,message=FALSE}
+# Load the required libraries
+library(ggplot2)
+library(GGally) # For plot_matrix function
+
+
+# Subset the variables for the scatterplot matrix
+variables_subset <- c("subtotal", "num_distinct_items", 
+                      "min_item_price", "max_item_price", 
+                      "total_onshift_dashers", "total_busy_dashers", 
+                      "total_outstanding_orders", 
+                      "estimated_store_to_consumer_driving_duration", 
+                      "estimated_order_place_durations")
+
+# Subset the data to include only the required variables
+subset_data <- dash_data_new_lm %>%
+  select(all_of(variables_subset), total_time)
+
+# Create the scatterplot matrix
+scatterplot_matrix <- ggpairs(subset_data, mapping = aes(y = total_time))
+
+# Display the scatterplot matrix
+print(scatterplot_matrix)
+
+
+
+```
+
+```{r}
+pairs(total_time ~.,data=dash_data_new_lm)
+```
+
+## Linear Model with AIC step
+
+```{r}
+ml_full<-lm(total_time~.,data=dash_data_new_lm)
+lm2 <- step(ml_full)
+summary(lm2)
+```
+
+```{r}
+lm3<-lm(total_time~subtotal+total_onshift_dashers+total_busy_dashers+total_outstanding_orders+estimated_store_to_consumer_driving_duration+estimated_order_place_durations ,data = dash_data_new)
+summary(lm3)
+
+#Gt summary on lm3
+library(gtsummary)
+summary_table <- tbl_regression(lm3)
+summary_table
+```
+
+## Write estimated regression model equation and R value and P-value
+
+\$ \hat{y}=25.66+0.17{subtotal}-0.36{totalonshiftdashers}-0.17{totalbusydashers }+0.38{totaloutstandingorders} + 1.22{estimatedstoretoconsumerdrivingduration}+ 1.43{estimatedorderplacedurations} \$
+
+## Check Conditions
+
+```{r}
+plot(lm3)
+
+```
+
+```{r}
+shapiro.test(resid(lm3))
+```
+
+## Box Cox Transformation Applied
+
+```{r}
+
+
+
+boxcox(lm3)
+summary(powerTransform(lm3))
+
+```
+
+```{r}
+lm4 <- lm((total_time^(-0.14) - 1) / (-0.14) ~ 
+            subtotal + 
+            total_onshift_dashers + 
+            total_busy_dashers + 
+            total_outstanding_orders + 
+            estimated_store_to_consumer_driving_duration + 
+            estimated_order_place_durations, 
+          data = dash_data_new)
+
+# Display the summary of the linear regression model
+summary(lm4)
+```
+
+```{r}
+
+plot(lm3)
+```
+
+```{r}
+
+shapiro.test(resid(lm4))
+```
