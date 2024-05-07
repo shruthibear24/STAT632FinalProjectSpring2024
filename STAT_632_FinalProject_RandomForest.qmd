@@ -1,0 +1,115 @@
+---
+title: "STAT 632 Final Project-Random Forest"
+author: "Shruthi Ganesh and Prabhjyot Grewal"
+format: 
+  html:
+    self-contained: true
+---
+
+## Packages
+
+```{r warning=FALSE,message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(tidyverse)
+library(randomForest)
+library(vip) # for plotting variable importance
+```
+
+```{r warning=FALSE,message=FALSE}
+dat<-read_csv("historical_data.csv")
+```
+
+
+```{r}
+df <- dat %>%
+  mutate(
+    store_primary_category= if_else(is.na(store_primary_category),"Miscellanous",store_primary_category),
+    total_time = as.integer(difftime(actual_delivery_time, created_at)),
+    estimated_store_to_consumer_driving_duration=estimated_store_to_consumer_driving_duration/60,
+    estimated_order_place_durations = round(estimated_order_place_duration / 60,1),
+    subtotal=round(subtotal/100),
+    min_item_price=round(min_item_price/100,1),
+    max_item_price=round(max_item_price/100,1)
+
+  )
+
+#df$estimated_order_place_duration<-df$estimated_order_place_duration/60
+df2<-df |>  select(created_at,actual_delivery_time,store_primary_category,store_id,subtotal,num_distinct_items,min_item_price,max_item_price,total_onshift_dashers,total_busy_dashers,total_outstanding_orders,
+  estimated_store_to_consumer_driving_duration,total_time,estimated_order_place_durations)
+```
+
+```{r}
+set.seed(123)
+ n <- nrow(df2)
+ train_index <- sample(1:n, round(0.70*n))
+ dash_train <- df2[train_index, ]
+ dash_test <- df2[-train_index, ] 
+ #nrow(dash_test)
+dash_data <- dash_test[sample(nrow(dash_test), 5000), ]
+dash_data_inc<- dash_train[sample(nrow(dash_train),60000), ]
+```
+
+### When Sample Size is 5000
+
+```{r}
+dash_data_new_rf<-dash_data |> 
+  select(-created_at,-actual_delivery_time,-store_primary_category,-store_id)
+```
+
+### Removed NA Values
+
+```{r}
+dash_data_new_rf<-na.omit(dash_data_new_rf)
+```
+
+
+### Random  Forest Model
+
+```{r}
+set.seed(632)
+rf1 <- randomForest(total_time ~ ., data = dash_data_new_rf, importance = TRUE)
+rf1
+```
+
+### MSE and VIP plots
+
+```{r}
+ plot(c(1:500),rf1$mse,xlab="ntree",ylab="MSE",type="l")
+ vip(rf1,num_features=6,geom="point",include_type=TRUE)
+```
+
+## When Sample Size is 60000
+
+```{r}
+dash_data_new_rf_inc<-dash_data_inc |> 
+  select(-created_at,-actual_delivery_time,-store_primary_category,-store_id)
+
+```
+
+
+### Remove NA values
+
+```{r}
+dash_data_new_rf_2<-na.omit(dash_data_new_rf_inc)
+```
+
+
+
+### Random Forest Model
+
+```{r}
+set.seed(632)
+rf2 <- randomForest(total_time ~ ., ntree = 1000, data = dash_data_new_rf_2, importance = TRUE)
+rf2
+```
+
+### Variable Importance and MSE plot
+
+
+```{r}
+ plot(c(1:1000),rf2$mse,xlab="ntree",ylab="MSE",type="l")
+ vip(rf2,num_features=6,geom="point",include_type=TRUE)
+```
+
+
